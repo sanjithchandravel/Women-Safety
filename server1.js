@@ -6,8 +6,7 @@ const mongoose = require('mongoose');
 // Create an Express app
 const app = express();
 const mongoUrl =
-	process.env.MONGO_URL ||
-	'mongodb+srv://sharpsanjith:root@cluster0.xujyw.mongodb.net/safety_analytics';
+	'mongodb+srv://sharpsanjith:root@cluster0.xujyw.mongodb.net/safety_analytics?retryWrites=true&w=majority';
 const port = process.env.PORT || 8080;
 
 // Define a Mongoose schema and model
@@ -44,6 +43,18 @@ async function initialize() {
 		process.exit(1);
 	}
 }
+app.post('/get', async (req, res) => {
+	try {
+		// Retrieve all documents from the tracking collection
+		const allLocations = await Tracking.find({});
+
+		// Send the retrieved documents as a response
+		res.status(200).json(allLocations);
+	} catch (error) {
+		console.error('Error retrieving location data:', error);
+		res.status(500).send('Error retrieving location data');
+	}
+});
 
 // Endpoint to receive location data
 app.post('/location', async (req, res) => {
