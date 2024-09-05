@@ -1,13 +1,15 @@
-require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
 const mongoose = require('mongoose');
+const { setInterval } = require('timers');
 
 // Create an Express app
 const app = express();
 const mongoUrl =
 	'mongodb+srv://sharpsanjith:root@cluster0.xujyw.mongodb.net/safety_analytics?retryWrites=true&w=majority';
 const port = process.env.PORT || 8080;
+const proximityRadius = 100; // Radius in meters
+const edgeUpdateInterval = 5 * 60 * 1000; // 5 minutes in milliseconds
 
 // Define a Mongoose schema and model
 const trackingSchema = new mongoose.Schema({
@@ -17,6 +19,7 @@ const trackingSchema = new mongoose.Schema({
 	gender: String,
 	timestamp: { type: Date, default: Date.now },
 	isSOS: { type: Boolean, default: false },
+	edges: [String], // Stores IDs of users in proximity
 });
 
 const Tracking = mongoose.model('trackings', trackingSchema);
@@ -38,31 +41,29 @@ async function initialize() {
 		app.listen(port, '0.0.0.0', () => {
 			console.log(`Server running on http://0.0.0.0:${port}`);
 		});
+
+		// Periodic update of edges
+		setInterval(async () => {
+			try {
+				await updateEdges();
+			} catch (error) {
+				console.error('Error during edge update:', error);
+			}
+		}, edgeUpdateInterval);
 	} catch (error) {
 		console.error('Error connecting to MongoDB:', error);
 		process.exit(1);
 	}
 }
-app.post('/get', async (req, res) => {
-	try {
-		// Retrieve all documents from the tracking collection
-		const allLocations = await Tracking.find({});
 
-		// Send the retrieved documents as a response
-		res.status(200).json(allLocations);
-	} catch (error) {
-		console.error('Error retrieving location data:', error);
-		res.status(500).send('Error retrieving location data');
-	}
-});
-
-// Endpoint to receive location data
+// Route to handle location updates
 app.post('/location', async (req, res) => {
 	const data = req.body;
 
 	console.log('Received location data:', data);
 
 	try {
+		// Update or insert location data
 		const result = await Tracking.updateOne(
 			{ userId: data.user },
 			{
@@ -78,12 +79,128 @@ app.post('/location', async (req, res) => {
 		);
 
 		console.log('Update result:', result);
+
+		// Update edges and perform detections
+		await updateEdges();
+		await detectLoneWoman(data.user);
+		await detectSurroundedByMen(data.user);
+
 		res.status(200).send('Location data received and processed');
 	} catch (error) {
 		console.error('Error processing location data:', error);
 		res.status(500).send('Error processing location data');
 	}
 });
+
+// Retrieve all location data
+app.post('/get', async (req, res) => {
+	try {
+		const allLocations = await Tracking.find({});
+		res.status(200).json(allLocations);
+	} catch (error) {
+		console.error('Error retrieving location data:', error);
+		res.status(500).send('Error retrieving location data');
+	}
+});
+
+// Update edges based on proximity
+// Update edges based on proximity
+async function updateEdges() {
+	const nodes = await Tracking.find({}).exec();
+	const userIds = nodes.map((node) => node.userId);
+
+	// Clear existing edges
+	await Tracking.updateMany({}, { $set: { edges: [] } });
+
+	for (let i = 0; i < userIds.length; i++) {
+		for (let j = i + 1; j < userIds.length; j++) {
+			const user1 = nodes.find((node) => node.userId === userIds[i]);
+			const user2 = nodes.find((node) => node.userId === userIds[j]);
+
+			if (
+				user1.gender !== user2.gender &&
+				isWithinProximity(user1, user2)
+			) {
+				const updatedEdges1 = await Tracking.findOneAndUpdate(
+					{ userId: userIds[i] },
+					{ $addToSet: { edges: userIds[j] } },
+					{ new: true }
+				);
+
+				const updatedEdges2 = await Tracking.findOneAndUpdate(
+					{ userId: userIds[j] },
+					{ $addToSet: { edges: userIds[i] } },
+					{ new: true }
+				);
+
+				console.log(
+					`Edges updated for user ${userIds[i]}: ${updatedEdges1.edges}`
+				);
+				console.log(
+					`Edges updated for user ${userIds[j]}: ${updatedEdges2.edges}`
+				);
+			}
+		}
+	}
+}
+
+// Check if two users are within proximity radius
+function isWithinProximity(user1, user2) {
+	const distance = getDistance(
+		user1.latitude,
+		user1.longitude,
+		user2.latitude,
+		user2.longitude
+	);
+	return distance <= proximityRadius;
+}
+
+// Calculate distance between two latitude/longitude points using Haversine formula
+function getDistance(lat1, lon1, lat2, lon2) {
+	const R = 6371e3; // Radius of Earth in meters
+	const φ1 = (lat1 * Math.PI) / 180;
+	const φ2 = (lat2 * Math.PI) / 180;
+	const Δφ = ((lat2 - lat1) * Math.PI) / 180;
+	const Δλ = ((lon2 - lon1) * Math.PI) / 180;
+
+	const a =
+		Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+		Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+	const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+	return R * c;
+}
+
+// Lone Woman Detection
+async function detectLoneWoman(userId) {
+	const user = await Tracking.findOne({ userId }).exec();
+	const currentHour = new Date(user.timestamp).getHours();
+
+	if (user.gender === 'Female' && (currentHour >= 22 || currentHour < 6)) {
+		const nearbyMales = await Tracking.find({
+			gender: 'Male',
+			userId: { $ne: userId },
+		}).exec();
+
+		if (nearbyMales.length === 0) {
+			console.log(
+				`Lone woman detected at night for user ${userId} at location (${user.latitude}, ${user.longitude}).`
+			);
+		}
+	}
+}
+
+// Surrounded by Men Detection
+async function detectSurroundedByMen(userId) {
+	const user = await Tracking.findOne({ userId }).exec();
+	const edges = user.edges || [];
+
+	if (user.gender === 'Female' && edges.length >= 3) {
+		console.log(
+			`Woman surrounded by men detected for user ${userId} at location (${user.latitude}, ${user.longitude}).`
+		);
+	}
+}
 
 // Initialize the app
 initialize();
