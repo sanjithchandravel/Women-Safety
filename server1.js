@@ -8,7 +8,12 @@ const mongoUrl = process.env.MONGO_URL;
 const dbName = 'safety_analytics';
 const port = process.env.PORT || 8080;
 
-const client = new MongoClient(mongoUrl);
+const client = new MongoClient(mongoUrl, {
+	useNewUrlParser: true,
+	useUnifiedTopology: true,
+	tls: true,
+	tlsAllowInvalidCertificates: true, // Only for debugging; remove for production
+});
 
 let db;
 let trackingCollection;
