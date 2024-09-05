@@ -5,7 +5,7 @@ const { MongoClient } = require('mongodb');
 
 const app = express();
 
-const mongourl = process.env.MONGO_URL;
+const mongoUrl = process.env.MONGO_URL;
 //const mongoUrl = 'mongodb+srv://sharpsanjith:root@cluster0.xujyw.mongodb.net/safety_analytics?retryWrites=true&w=majority';
 const dbName = 'safety_analytics';
 const proximityRadius = 100; // Radius in meters
