@@ -9,10 +9,8 @@ const dbName = 'safety_analytics';
 const port = process.env.PORT || 8080;
 
 const client = new MongoClient(mongoUrl, {
-	useNewUrlParser: true,
-	useUnifiedTopology: true,
 	tls: true,
-	tlsAllowInvalidCertificates: true, // Only for debugging; remove for production
+	tlsAllowInvalidCertificates: false, // For production, set this to false
 });
 
 let db;
