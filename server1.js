@@ -1,30 +1,40 @@
 require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
-const { MongoClient } = require('mongodb');
+const mongoose = require('mongoose');
 
+// Create an Express app
 const app = express();
 const mongoUrl =
-	'mongodb+srv://sharpsanjith:root@cluster0.xujyw.mongodb.net/safety_analytics?retryWrites=true&w=majority';
-const dbName = 'safety_analytics';
+	process.env.MONGO_URL ||
+	'mongodb+srv://sharpsanjith:root@cluster0.xujyw.mongodb.net/safety_analytics';
 const port = process.env.PORT || 8080;
 
-const client = new MongoClient(mongoUrl, {
-	tls: true,
-	tlsAllowInvalidCertificates: false, // For production, set this to false
+// Define a Mongoose schema and model
+const trackingSchema = new mongoose.Schema({
+	userId: String,
+	latitude: Number,
+	longitude: Number,
+	gender: String,
+	timestamp: { type: Date, default: Date.now },
+	isSOS: { type: Boolean, default: false },
 });
 
-let db;
-let trackingCollection;
+const Tracking = mongoose.model('trackings', trackingSchema);
 
+// Middleware
 app.use(bodyParser.json());
 
 async function initialize() {
 	try {
-		await client.connect();
+		await mongoose.connect(mongoUrl, {
+			useNewUrlParser: true,
+			useUnifiedTopology: true,
+			tls: true,
+			tlsAllowInvalidCertificates: false, // For production, set this to false
+		});
+
 		console.log('Connected to MongoDB');
-		db = client.db(dbName);
-		trackingCollection = db.collection('tracking');
 
 		app.listen(port, '0.0.0.0', () => {
 			console.log(`Server running on http://0.0.0.0:${port}`);
@@ -35,18 +45,14 @@ async function initialize() {
 	}
 }
 
+// Endpoint to receive location data
 app.post('/location', async (req, res) => {
 	const data = req.body;
 
 	console.log('Received location data:', data);
 
-	if (!trackingCollection) {
-		console.error('Tracking collection is not initialized.');
-		return res.status(500).send('Server error');
-	}
-
 	try {
-		const result = await trackingCollection.updateOne(
+		const result = await Tracking.updateOne(
 			{ userId: data.user },
 			{
 				$set: {
@@ -68,4 +74,5 @@ app.post('/location', async (req, res) => {
 	}
 });
 
+// Initialize the app
 initialize();
