@@ -9,7 +9,7 @@ const mongoUrl =
 	'mongodb+srv://sharpsanjith:root@cluster0.xujyw.mongodb.net/safety_analytics?retryWrites=true&w=majority';
 const port = process.env.PORT || 8080;
 const proximityRadius = 100; // Radius in meters
-const edgeUpdateInterval = 5 * 60 * 1000; // 5 minutes in milliseconds
+const edgeUpdateInterval = 1 * 60 * 1000; // 5 minutes in milliseconds
 
 // Define a Mongoose schema and model
 const trackingSchema = new mongoose.Schema({
@@ -103,8 +103,6 @@ app.post('/get', async (req, res) => {
 	}
 });
 
-// Update edges based on proximity
-// Update edges based on proximity
 async function updateEdges() {
 	const nodes = await Tracking.find({}).exec();
 	const userIds = nodes.map((node) => node.userId);
@@ -144,6 +142,47 @@ async function updateEdges() {
 	}
 }
 
+async function detectLoneWoman(userId) {
+	const user = await Tracking.findOne({ userId }).exec();
+	if (!user) {
+		console.log(`User with ID ${userId} not found.`);
+		return;
+	}
+
+	console.log(
+		`Checking lone woman detection for user ${userId}. Current edges: ${user.edges}`
+	);
+
+	// Check if the edges array is empty
+	if (user.edges.length === 0) {
+		console.log(
+			`User ${userId} is alone at location (${user.latitude}, ${user.longitude}).`
+		);
+
+		// Optionally check if it is nighttime
+		const currentHour = new Date(user.timestamp).getHours();
+		if (
+			user.gender === 'Female' &&
+			(currentHour >= 22 || currentHour < 6)
+		) {
+			console.log(
+				`Lone woman detected at night for user ${userId} at location (${user.latitude}, ${user.longitude}).`
+			);
+		}
+	}
+}
+
+async function detectSurroundedByMen(userId) {
+	const user = await Tracking.findOne({ userId }).exec();
+	const edges = user.edges || [];
+
+	if (user.gender === 'Female' && edges.length >= 3) {
+		console.log(
+			`Woman surrounded by men detected for user ${userId} at location (${user.latitude}, ${user.longitude}).`
+		);
+	}
+}
+
 // Check if two users are within proximity radius
 function isWithinProximity(user1, user2) {
 	const distance = getDistance(
@@ -169,37 +208,6 @@ function getDistance(lat1, lon1, lat2, lon2) {
 	const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 
 	return R * c;
-}
-
-// Lone Woman Detection
-async function detectLoneWoman(userId) {
-	const user = await Tracking.findOne({ userId }).exec();
-	const currentHour = new Date(user.timestamp).getHours();
-
-	if (user.gender === 'Female' && (currentHour >= 22 || currentHour < 6)) {
-		const nearbyMales = await Tracking.find({
-			gender: 'Male',
-			userId: { $ne: userId },
-		}).exec();
-
-		if (nearbyMales.length === 0) {
-			console.log(
-				`Lone woman detected at night for user ${userId} at location (${user.latitude}, ${user.longitude}).`
-			);
-		}
-	}
-}
-
-// Surrounded by Men Detection
-async function detectSurroundedByMen(userId) {
-	const user = await Tracking.findOne({ userId }).exec();
-	const edges = user.edges || [];
-
-	if (user.gender === 'Female' && edges.length >= 3) {
-		console.log(
-			`Woman surrounded by men detected for user ${userId} at location (${user.latitude}, ${user.longitude}).`
-		);
-	}
 }
 
 // Initialize the app
